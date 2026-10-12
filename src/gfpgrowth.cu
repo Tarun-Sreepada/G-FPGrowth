@@ -106,7 +106,7 @@ size_t run(const Options& o) {
         if (!done) {
             if (wantEclat && o.algo == "eclat") log_warn("falling back to FP-Growth");
             InitialTree tree = build_tree(ranked);
-            res = mine_patterns(tree, minsup);
+            res = mine_patterns(tree, minsup, o.sched == "device");
         }
     }
     write_patterns(o, res, rankToItem);

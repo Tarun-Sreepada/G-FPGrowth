@@ -32,6 +32,7 @@ def main() -> int:
     ap.add_argument("--sep", default=" ", help="literal separator character used in the input file")
     ap.add_argument("--mode", default="gpu", choices=["gpu", "cpu", "cpu1"])
     ap.add_argument("--algo", default="auto")
+    ap.add_argument("--sched", default="device")
     ap.add_argument("--binary", default=str(ROOT / "build/bin/g-fpgrowth"))
     ap.add_argument("--workdir", default=str(ROOT / "out"))
     a = ap.parse_args()
@@ -46,7 +47,7 @@ def main() -> int:
                    check=True, stdout=subprocess.DEVNULL)
     t_ref = time.time() - t
     t = time.time()
-    subprocess.run([a.binary, "--mode", a.mode, "--algo", a.algo, a.input, str(gpu_out), a.minsup, a.sep], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run([a.binary, "--mode", a.mode, "--algo", a.algo, "--sched", a.sched, a.input, str(gpu_out), a.minsup, a.sep], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     t_gpu = time.time() - t
 
     ref, gpu = load(ref_out, "\t"), load(gpu_out, a.sep)

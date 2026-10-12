@@ -8,7 +8,7 @@ counting, FP-tree construction and mining all run on the GPU (CUDA).
 ## Usage
 
 ```
-g-fpgrowth [-m gpu|cpu|cpu1] [-t threads] [-v] <input> <output> <minsup> [sep]
+g-fpgrowth [-m gpu|cpu|cpu1] [-t threads] [-a auto|fpgrowth|eclat] [--sched device|host] [-v] <input> <output> <minsup> [sep]
 ```
 
 `-m gpu` (default) runs on the GPU, `-m cpu` is the multi-threaded CPU baseline
@@ -77,6 +77,29 @@ Two miners, both with the same chunked-memory scheme and both available on CPU a
   over <= 1000 frequent items, FP-Growth otherwise. That rule was measured on the SPMF
   datasets (see below), not derived; override it with `-a`.
 
+### Device-side task queue (GPU FP-Growth)
+
+`--sched device` (default) runs the whole traversal in **one persistent kernel**: no host
+round trip per batch. Work lives in *groups* (a published conditional tree whose slots are
+the tasks); a task is claimed with a single 64-bit CAS on `depth:16|K:24|next:24`, which also
+identifies the group incarnation. Every block statically owns one chunk per recursion level,
+so the child of any claimed task always has a chunk (no free list, no deadlock). Idle blocks
+steal slots from any live group, shallowest first; an owner reuses a group's chunk only after
+all of its slots completed; termination is a global pending-task counter. Patterns go to a
+device record buffer (overflow falls back to the host-driven miner).
+
+Because each block needs a full set of chunks, trees with many nodes leave few blocks; if
+fewer than half of the resident blocks fit, the host-driven batches are used instead (they
+keep many more tasks in flight). Measured mining time, host-driven vs device queue:
+
+| dataset @minsup | host batches | device queue |
+|---|---|---|
+| pumsb @0.6 | 928 ms | 579 ms |
+| mushrooms @0.1 | 27.6 ms | 18.7 ms |
+| connect @0.8 | 23.0 ms | 16.5 ms |
+| chess @0.6 | 13.3 ms | 9.1 ms |
+| retail @0.0005 | 114 ms | 933 ms (not used, too few blocks) |
+
 ## Benchmark
 
 `uv run python scripts/benchmark.py` runs GPU / CPU / CPU-1-thread (best of 3, in-process
@@ -100,7 +123,8 @@ dense inputs it is bound by fixed costs (CUDA context, transfers, per-batch host
 trips) or by output formatting, and the multi-threaded CPU wins.
 
 ### Ideas not done yet
-* device-side task queue / persistent kernel (no per-batch host round trip)
+* smaller chunks for deep recursion levels so the device queue can use more blocks on large trees
+* device-side task queue for the bitset (Eclat) miner
 * diffsets (dEclat) for dense data, perfect-extension pruning
 * sibling merging after pruning in conditional trees
 * GPUDirect Storage for very large inputs

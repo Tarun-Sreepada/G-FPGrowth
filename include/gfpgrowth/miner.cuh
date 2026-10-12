@@ -15,10 +15,14 @@ struct MiningResult {
     size_t batches = 0;
 };
 
+// With deviceQueue the whole traversal runs in one persistent kernel with a device-side task
+// queue (work stealing between blocks, no host round trips); otherwise the host launches
+// one kernel per batch of tasks.
+//
 // Pattern-growth over GPU memory that is pre-partitioned into equally sized chunks.
 // Every conditional FP-tree has <= the nodes of the initial tree, so one chunk
 // (sized for the initial tree) always fits any tree that is ever built.
-MiningResult mine_patterns(InitialTree& tree, int minsup);
+MiningResult mine_patterns(InitialTree& tree, int minsup, bool deviceQueue = true);
 
 // Dense-data alternative: vertical bitsets + AND/popcount (Eclat). Same chunked-memory
 // scheme: every class (set of item bitsets) is no larger than the root class.

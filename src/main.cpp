@@ -39,6 +39,9 @@ int main(int argc, char** argv) {
     app.add_option("-a,--algo", opt.algo, "Algorithm: auto (pick by density), fpgrowth or eclat (bitset)")
         ->check(CLI::IsMember({"auto", "fpgrowth", "eclat"}))
         ->capture_default_str();
+    app.add_option("--sched", opt.sched, "GPU FP-Growth scheduler: device (persistent kernel + device task queue) or host")
+        ->check(CLI::IsMember({"device", "host"}))
+        ->capture_default_str();
     app.add_flag("-v,--verbose", opt.verbose, "Verbose (debug) logging");
     CLI11_PARSE(app, argc, argv);
 
