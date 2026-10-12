@@ -1,0 +1,8 @@
+build/
+.venv/
+__pycache__/
+*.pyc
+out/
+# datasets are downloaded with scripts/get_datasets.sh
+datasets/*.txt
+!datasets/README.md
