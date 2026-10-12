@@ -38,6 +38,30 @@ __device__ __forceinline__ T atomic_cas(T* p, T expected, T desired) {
     return expected;
 }
 
+template <typename T>
+__device__ __forceinline__ void atomic_or(T* p, T v) {
+    cuda::atomic_ref<T, cuda::thread_scope_device>(*p).fetch_or(v, cuda::memory_order_relaxed);
+}
+
+// In-place exclusive scan of a[0,n) by one block; returns the total to every thread.
+__device__ __forceinline__ int block_exclusive_scan(int32_t* a, int n) {
+    using Scan = cub::BlockScan<int, kBlock>;
+    __shared__ typename Scan::TempStorage ts;
+    __shared__ int carry;
+    if (threadIdx.x == 0) carry = 0;
+    __syncthreads();
+    for (int base = 0; base < n; base += kBlock) {
+        int idx = base + threadIdx.x;
+        int v = idx < n ? a[idx] : 0, ex, agg;
+        Scan(ts).ExclusiveSum(v, ex, agg);
+        if (idx < n) a[idx] = ex + carry;
+        __syncthreads();
+        if (threadIdx.x == 0) carry += agg;
+        __syncthreads();
+    }
+    return carry;
+}
+
 // ---- CUB two-phase calls ----------------------------------------------------------------
 template <typename F>
 void cub_run(F&& f) {

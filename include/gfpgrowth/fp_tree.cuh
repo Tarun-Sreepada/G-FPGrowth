@@ -20,6 +20,26 @@ struct InitialTree {
     size_t filteredItems = 0;
 };
 
+// Transactions after counting + ranking: sorted (txn << 32 | rank) keys of the frequent
+// items only, shared by the FP-tree builder and the bitset (Eclat) miner.
+struct RankedDB {
+    DeviceBuffer<uint64_t> keys;
+    size_t numKeys = 0;
+    size_t numTransactions = 0;
+    int numFrequent = 0;
+    std::vector<int32_t> rankToItem;  // rank -> original item id
+    std::vector<int32_t> support;     // rank -> support
+    int maxPatternLen = 0;
+    DeviceBuffer<int32_t> tabItem, tabTot;  // device copies (slot == rank)
+};
+
+// Counts items, drops infrequent ones, ranks items by (support desc, id asc) and
+// re-sorts each transaction by rank.
+RankedDB rank_transactions(ParsedDB& db, int minsup);
+
+// Builds the initial FP-tree from ranked transactions (consumes r.keys).
+InitialTree build_tree(RankedDB& r);
+
 // Counts items, drops infrequent ones, ranks items by (support desc, id asc),
 // re-sorts each transaction by rank and inserts every transaction into the tree
 // concurrently (one thread per transaction, lock-free open-addressing hash of

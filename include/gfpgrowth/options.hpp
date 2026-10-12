@@ -8,6 +8,7 @@ struct Options {
     std::string output;
     std::string minsup;  // "10" = absolute count, "0.01" (contains '.') = fraction of #transactions
     char sep = '\t';
+    std::string algo = "auto";  // auto | fpgrowth | eclat
     bool verbose = false;
 };
 

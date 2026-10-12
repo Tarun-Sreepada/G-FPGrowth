@@ -24,7 +24,7 @@ CASES = [
 MODES = ["gpu", "cpu", "cpu1"]
 PAT = {
     "parse": re.compile(r"parsed on (?:GPU|CPU).* in ([\d.]+) ms"),
-    "tree": re.compile(r"initial FP-tree.* ([\d.]+) ms"),
+    "tree": re.compile(r"initial (?:FP-tree|bitmaps).* ([\d.]+) ms"),
     "mine": re.compile(r"mined (\d+) frequent itemsets.* ([\d.]+) ms"),
     "total": re.compile(r"wrote (\d+) patterns to .*total ([\d.]+) ms"),
 }
@@ -37,7 +37,8 @@ def run(binary, mode, path, minsup, out, sep=" "):
     txt = p.stdout + p.stderr
     r = {"wall_ms": wall}
     r["parse_ms"] = float(PAT["parse"].search(txt).group(1))
-    r["tree_ms"] = float(PAT["tree"].search(txt).group(1))
+    m = PAT["tree"].search(txt)
+    r["tree_ms"] = float(m.group(1)) if m else 0.0
     m = PAT["mine"].search(txt)
     r["patterns"], r["mine_ms"] = int(m.group(1)), float(m.group(2))
     r["total_ms"] = float(PAT["total"].search(txt).group(2))

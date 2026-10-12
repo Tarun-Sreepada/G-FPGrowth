@@ -131,9 +131,9 @@ __global__ void k_tab_end(const int32_t* sortedItems, int32_t n, int32_t F, int3
 
 }  // namespace
 
-InitialTree build_initial_tree(ParsedDB& db, int minsup) {
+RankedDB rank_transactions(ParsedDB& db, int minsup) {
     StageTimer timer;
-    InitialTree tree;
+    RankedDB tree;
     const int64_t M0 = (int64_t)db.numKeys;
     if (M0 == 0) return tree;
 
@@ -176,7 +176,11 @@ InitialTree build_initial_tree(ParsedDB& db, int minsup) {
         GFP_CUDA(cudaGetLastError());
         std::vector<uint64_t> h = ord.to_host();
         tree.rankToItem.resize(F);
-        for (int r = 0; r < F; ++r) tree.rankToItem[r] = (int32_t)(h[r] & 0xffffffffu);
+        tree.support.resize(F);
+        for (int r = 0; r < F; ++r) {
+            tree.rankToItem[r] = (int32_t)(h[r] & 0xffffffffu);
+            tree.support[r] = 0x7fffffff - (int32_t)(h[r] >> 32);
+        }
     }
     fcnt.free();
 
@@ -193,8 +197,9 @@ InitialTree build_initial_tree(ParsedDB& db, int minsup) {
         GFP_CUDA(cudaGetLastError());
         M = d.get(0);
     }
-    tree.filteredItems = (size_t)M;
     if (M == 0) { tree.numFrequent = 0; return tree; }
+    tree.numKeys = (size_t)M;
+    tree.numTransactions = db.numTransactions;
 
     // Longest possible pattern: the minsup-th longest filtered transaction.
     {
@@ -205,7 +210,23 @@ InitialTree build_initial_tree(ParsedDB& db, int minsup) {
         radix_sort(len, nt, 31, /*descending=*/true);
         tree.maxPatternLen = nt >= (size_t)minsup ? (int)len.get(minsup - 1) : (int)len.get(0);
     }
+    tree.keys.swap(db.keys);
+    db.numKeys = 0;
+    return tree;
+}
 
+InitialTree build_tree(RankedDB& r) {
+    StageTimer timer;
+    InitialTree tree;
+    tree.numFrequent = r.numFrequent;
+    tree.tabItem.swap(r.tabItem);
+    tree.tabTot.swap(r.tabTot);
+    tree.rankToItem = r.rankToItem;
+    tree.maxPatternLen = r.maxPatternLen;
+    tree.filteredItems = r.numKeys;
+    const int F = r.numFrequent;
+    const int64_t M = (int64_t)r.numKeys;
+    if (F == 0 || M == 0) { tree.numFrequent = 0; return tree; }
     // ---- concurrent insertion into a hash-indexed node store -------------------------
     if (M >= (1LL << 30)) throw std::runtime_error("too many item occurrences for the 32-bit node ids");
     uint64_t HS = 1024;
@@ -217,11 +238,10 @@ InitialTree build_initial_tree(ParsedDB& db, int minsup) {
         DeviceBuffer<int32_t> tc(HS);
         tk.fill_bytes(0xFF);  // kEmpty
         tc.zero();
-        k_insert<<<grid_for((int64_t)db.numTransactions), kBlock>>>(db.keys.data(), M, (int64_t)db.numTransactions,
+        k_insert<<<grid_for((int64_t)r.numTransactions), kBlock>>>(r.keys.data(), M, (int64_t)r.numTransactions,
                                                                     tk.data(), tc.data(), HS - 1);
         GFP_CUDA(cudaGetLastError());
-        db.keys.free();
-        db.numKeys = 0;
+        r.keys.free();
 
         DeviceBuffer<int32_t> flag(HS), pos(HS);
         k_occupied<<<grid_for((int64_t)HS), kBlock>>>(tk.data(), (int64_t)HS, flag.data());
@@ -267,6 +287,12 @@ InitialTree build_initial_tree(ParsedDB& db, int minsup) {
     log_info("initial FP-tree: %d frequent items, %d nodes (%lld filtered item occurrences), max pattern length <= %d, %.2f ms",
              F, N, (long long)M, tree.maxPatternLen, timer.elapsed_ms());
     return tree;
+}
+
+
+InitialTree build_initial_tree(ParsedDB& db, int minsup) {
+    RankedDB r = rank_transactions(db, minsup);
+    return build_tree(r);
 }
 
 }  // namespace gfp

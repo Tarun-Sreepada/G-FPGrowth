@@ -228,7 +228,19 @@ int build_child(const Tree& T, int j, Tree& C, Scratch& S, int minsup) {
     return KC;
 }
 
+// Vertical (bitset) class used by the dense-data Eclat path: m items, each a bitset of W words.
+struct Cls {
+    std::vector<uint64_t> bits;
+    std::vector<int32_t> item, sup;
+    int m = 0;
+};
+
 struct Worker {
+    std::vector<std::unique_ptr<Cls>> clevels;
+    Cls& clevel(size_t d) {
+        while (clevels.size() <= d) clevels.emplace_back(new Cls());
+        return *clevels[d];
+    }
     std::vector<std::unique_ptr<Tree>> levels;
     Scratch S;
     std::vector<int32_t> stack;
@@ -253,20 +265,80 @@ inline void append_uint(std::string& s, uint32_t v) {
     while (n) s.push_back(buf[--n]);
 }
 
-void expand(Worker& W, const Ctx& X, const Tree& T, int j, size_t depth) {
-    W.stack.push_back(T.tabItem[j]);
+inline void emit_pattern(Worker& W, const Ctx& X, uint32_t support) {
     for (size_t i = 0; i < W.stack.size(); ++i) {
         if (i) W.out.push_back(X.sep);
         W.out += (*X.idStr)[W.stack[i]];
     }
     W.out.push_back(':');
-    append_uint(W.out, (uint32_t)T.tabTot[j]);
+    append_uint(W.out, support);
     W.out.push_back('\n');
     ++W.patterns;
+}
+
+// A conditional tree that is a single path: every non-empty subset of its items, appended to
+// the current pattern, is frequent; its support is the count of the deepest chosen node.
+void emit_chain(Worker& W, const Ctx& X, const Tree& C, int from) {
+    for (int k = from; k < C.K; ++k) {
+        W.stack.push_back(C.tabItem[k]);
+        emit_pattern(W, X, (uint32_t)C.tabTot[k]);
+        emit_chain(W, X, C, k + 1);
+        W.stack.pop_back();
+    }
+}
+
+void expand(Worker& W, const Ctx& X, const Tree& T, int j, size_t depth) {
+    W.stack.push_back(T.tabItem[j]);
+    emit_pattern(W, X, (uint32_t)T.tabTot[j]);
 
     Tree& C = W.level(depth + 1);
     const int KC = build_child(T, j, C, W.S, X.minsup);
-    for (int k = KC - 1; k >= 0; --k) expand(W, X, C, k, depth + 1);
+    bool chain = KC > 0 && C.n - 1 == KC;
+    for (int d = 1; chain && d <= KC; ++d) chain = C.parent[d] == d - 1;
+    if (chain) emit_chain(W, X, C, 0);
+    else for (int k = KC - 1; k >= 0; --k) expand(W, X, C, k, depth + 1);
+    W.stack.pop_back();
+}
+
+// ---- Eclat on bitsets (dense data) ----------------------------------------------------
+void expand_eclat(Worker& W, const Ctx& X, const Cls& T, int i, size_t W64, size_t depth) {
+    W.stack.push_back(T.item[i]);
+    emit_pattern(W, X, (uint32_t)T.sup[i]);
+    Cls& C = W.clevel(depth + 1);
+    const size_t cap = (size_t)(T.m - i - 1);
+    if (cap) {
+        if (C.item.size() < cap) { C.item.resize(cap); C.sup.resize(cap); C.bits.resize(cap * W64); }
+        const uint64_t* a = T.bits.data() + (size_t)i * W64;
+        int cnt = 0;
+        for (int j = i + 1; j < T.m; ++j) {
+            const uint64_t* b = T.bits.data() + (size_t)j * W64;
+            uint64_t* d = C.bits.data() + (size_t)cnt * W64;
+            uint64_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+            size_t w = 0;
+            for (; w + 4 <= W64; w += 4) {
+                const uint64_t v0 = a[w] & b[w], v1 = a[w + 1] & b[w + 1], v2 = a[w + 2] & b[w + 2],
+                               v3 = a[w + 3] & b[w + 3];
+                d[w] = v0; d[w + 1] = v1; d[w + 2] = v2; d[w + 3] = v3;
+                s0 += (uint64_t)__builtin_popcountll(v0);
+                s1 += (uint64_t)__builtin_popcountll(v1);
+                s2 += (uint64_t)__builtin_popcountll(v2);
+                s3 += (uint64_t)__builtin_popcountll(v3);
+            }
+            for (; w < W64; ++w) {
+                const uint64_t v = a[w] & b[w];
+                d[w] = v;
+                s0 += (uint64_t)__builtin_popcountll(v);
+            }
+            const uint64_t sup = s0 + s1 + s2 + s3;
+            if (sup >= (uint64_t)X.minsup) {
+                C.item[cnt] = T.item[j];
+                C.sup[cnt] = (int32_t)sup;
+                ++cnt;
+            }
+        }
+        C.m = cnt;
+        for (int k = 0; k < cnt; ++k) expand_eclat(W, X, C, k, W64, depth + 1);
+    }
     W.stack.pop_back();
 }
 
@@ -277,6 +349,11 @@ int resolve_minsup(const std::string& s, size_t numTxn) {
     if (v < 1) v = 1;
     return (int)std::ceil(v);
 }
+
+// Auto-selection (measured on the SPMF datasets): bitset Eclat wins for many transactions over
+// few items (cheap bitmaps, no tree build); FP-Growth wins for wide item sets / few transactions.
+constexpr size_t kEclatMinTxns = 100000;
+constexpr int kEclatMaxItems = 1000;
 
 struct TxnRef {
     const int32_t* p;
@@ -415,6 +492,69 @@ size_t run_cpu(const Options& o, int threads) {
         }
         L.items.resize(w);
     });
+
+    // ---- algorithm selection: dense data -> vertical bitset Eclat, otherwise FP-Growth -----
+    {
+        size_t M = 0;
+        for (auto& l : loc) M += l.items.size();
+        const size_t W64 = (numTxn + 63) / 64;
+        const double density = (double)M / ((double)numTxn * (double)F);
+        const bool fits = (size_t)F * W64 * 8 <= (size_t(1) << 30);
+        const bool useEclat = o.algo == "eclat" || (o.algo == "auto" && fits && numTxn >= kEclatMinTxns && F <= kEclatMaxItems);
+        log_info("transactions rewritten: %zu item occurrences, density %.3f -> %s", M, density,
+                 useEclat ? "bitset Eclat" : "FP-Growth");
+        if (useEclat) {
+            if (!fits) throw std::runtime_error("bitmaps do not fit in memory; use --algo fpgrowth");
+            auto tE = Clock::now();
+            std::vector<uint64_t> rows((size_t)F * W64, 0);
+            {
+                std::vector<size_t> base(T + 1, 0);
+                for (int t = 0; t < T; ++t) base[t + 1] = base[t] + loc[t].lens.size();
+                parallel(T, [&](int t) {
+                    size_t p = 0, g = base[t];
+                    for (uint32_t len : loc[t].lens) {
+                        for (uint32_t i = 0; i < len; ++i) {
+                            const size_t row = (size_t)(F - 1 - loc[t].items[p + i]);  // least frequent first
+                            __atomic_fetch_or(&rows[row * W64 + (g >> 6)], 1ULL << (g & 63), __ATOMIC_RELAXED);
+                        }
+                        p += len;
+                        ++g;
+                    }
+                });
+            }
+            Cls root;
+            root.m = F;
+            root.bits = std::move(rows);
+            root.item.resize(F);
+            root.sup.resize(F);
+            std::vector<std::string> idStr(F);
+            for (int p = 0; p < F; ++p) {
+                const int rank = F - 1 - p;
+                root.item[p] = rank;
+                root.sup[p] = (int32_t)freq[rank].first;
+                const int32_t id = origId.empty() ? freq[rank].second : origId[freq[rank].second];
+                idStr[rank] = std::to_string(id);
+            }
+            loc.clear(); loc.shrink_to_fit();
+            log_info("initial bitmaps: %d items x %zu words in %.2f ms", F, W64, ms_since(tE));
+            auto t2 = Clock::now();
+            Ctx X{minsup, o.sep, &idStr};
+            std::vector<Worker> workers(T);
+            std::atomic<int> next{0};
+            parallel(T, [&](int t) {
+                for (int i = next.fetch_add(1); i < F; i = next.fetch_add(1)) expand_eclat(workers[t], X, root, i, W64, 0);
+            });
+            size_t total = 0;
+            for (auto& w : workers) total += w.patterns;
+            log_info("mined %zu frequent itemsets in %.2f ms", total, ms_since(t2));
+            FILE* f = std::fopen(o.output.c_str(), "wb");
+            if (!f) throw std::runtime_error("cannot open output file: " + o.output);
+            for (auto& w : workers) std::fwrite(w.out.data(), 1, w.out.size(), f);
+            std::fclose(f);
+            log_info("wrote %zu patterns to %s; total %.2f ms", total, o.output.c_str(), ms_since(tAll));
+            return total;
+        }
+    }
 
     // ---- 4. bucket transactions by first (most frequent) item ---------------------------
     std::vector<TxnRef> refs(numTxn);

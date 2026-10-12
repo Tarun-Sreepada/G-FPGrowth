@@ -64,25 +64,46 @@ Dataset sources (SPMF, with original provenance) are listed in
 `reference/FPGrowth.py` is the PAMI Python implementation; `scripts/compare.py` runs
 both and checks that the sets of itemsets and supports are identical.
 
+## Algorithms
+
+Two miners, both with the same chunked-memory scheme and both available on CPU and GPU
+(`-a auto|fpgrowth|eclat`):
+
+* **FP-Growth** (array FP-tree, conditional trees built by ancestor projection). The CPU
+  version additionally short-circuits single-path conditional trees (all subsets are
+  enumerated directly) and counts supports with a branch-free reverse sweep.
+* **Bitset Eclat** (vertical tid-bitmaps, AND + popcount, AVX2/popcnt on CPU, warp-per-pair
+  on GPU). Needs no tree build. `auto` selects it for databases with >= 100k transactions
+  over <= 1000 frequent items, FP-Growth otherwise. That rule was measured on the SPMF
+  datasets (see below), not derived; override it with `-a`.
+
 ## Benchmark
 
 `uv run python scripts/benchmark.py` runs GPU / CPU / CPU-1-thread (best of 3, in-process
 timings, includes writing the output) and writes `out/benchmark.csv` and `out/benchmark.png`.
-Ryzen 5 5500GT (6C/12T) vs RTX 3070, total ms:
+Ryzen 5 5500GT (6C/12T) vs RTX 3070, total ms, `-a auto`:
 
 | dataset @minsup | GPU | CPU 12T | CPU 1T |
 |---|---|---|---|
-| retail @0.0005 | 134 | 681 | 1963 |
-| T10I4D100K @0.002 | 61 | 277 | 610 |
-| BMS2 @0.0008 | 34 | 43 | 162 |
-| accidents @0.3 | 140 | 252 | 420 |
-| pumsb @0.6 (19.5M patterns) | 1940 | 1143 | 2801 |
-| connect @0.8 | 80 | 46 | 107 |
-| chess @0.6 | 39 | 15 | 30 |
-| mushrooms @0.1 | 65 | 27 | 66 |
+| retail @0.0005 | 147 | 793 | 2056 |
+| retail @0.002 | 37 | 69 | 207 |
+| T10I4D100K @0.002 | 31 | 52 | 170 |
+| BMS2 @0.0008 | 36 | 48 | 166 |
+| accidents @0.3 | 135 | 129 | 488 |
+| connect @0.8 | 82 | 45 | 101 |
+| pumsb @0.6 (19.5M patterns) | 2174 | 1099 | 2793 |
+| mushrooms @0.1 | 69 | 26 | 57 |
+| chess @0.6 | 38 | 15 | 30 |
 
-The GPU wins on large sparse data (many transactions, many conditional trees);
-small dense inputs are launch/transfer-latency bound and the CPU wins.
+The GPU wins on large sparse data (many transactions, many conditional trees); on small or
+dense inputs it is bound by fixed costs (CUDA context, transfers, per-batch host round
+trips) or by output formatting, and the multi-threaded CPU wins.
+
+### Ideas not done yet
+* device-side task queue / persistent kernel (no per-batch host round trip)
+* diffsets (dEclat) for dense data, perfect-extension pruning
+* sibling merging after pruning in conditional trees
+* GPUDirect Storage for very large inputs
 
 ## Layout
 

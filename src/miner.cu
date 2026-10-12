@@ -48,25 +48,6 @@ __host__ __device__ inline View view_of(int32_t* pool, int64_t chunk, const Layo
     return v;
 }
 
-// In-place exclusive scan of a[0,n) by one block; returns the total to every thread.
-__device__ int block_exclusive_scan(int32_t* a, int n) {
-    using Scan = cub::BlockScan<int, kBS>;
-    __shared__ typename Scan::TempStorage ts;
-    __shared__ int carry;
-    if (threadIdx.x == 0) carry = 0;
-    __syncthreads();
-    for (int base = 0; base < n; base += kBS) {
-        int idx = base + threadIdx.x;
-        int v = idx < n ? a[idx] : 0, ex, agg;
-        Scan(ts).ExclusiveSum(v, ex, agg);
-        if (idx < n) a[idx] = ex + carry;
-        __syncthreads();
-        if (threadIdx.x == 0) carry += agg;
-        __syncthreads();
-    }
-    return carry;
-}
-
 // One thread block = one task: "append slot j of tree T to T's pattern and build the
 // conditional FP-tree of that pattern into chunk C".
 //

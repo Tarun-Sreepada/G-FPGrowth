@@ -91,9 +91,25 @@ size_t run(const Options& o) {
     const int minsup = resolve_minsup(o.minsup, db.numTransactions);
     log_info("minimum support: %d (of %zu transactions)", minsup, db.numTransactions);
 
-    InitialTree tree = build_initial_tree(db, minsup);
-    MiningResult res = mine_patterns(tree, minsup);
-    write_patterns(o, res, tree.rankToItem);
+    RankedDB ranked = rank_transactions(db, minsup);
+    MiningResult res;
+    std::vector<int32_t> rankToItem = ranked.rankToItem;
+    if (ranked.numFrequent > 0) {
+        const double density =
+            (double)ranked.numKeys / ((double)ranked.numTransactions * (double)ranked.numFrequent);
+        // same measured rule as the CPU path: many transactions over few items -> bitsets
+        const bool wantEclat = o.algo == "eclat" || (o.algo == "auto" && ranked.numTransactions >= 100000 &&
+                                                     ranked.numFrequent <= 1000);
+        log_info("%d frequent items, %zu item occurrences, density %.3f", ranked.numFrequent, ranked.numKeys, density);
+        bool done = false;
+        if (wantEclat) done = mine_eclat(ranked, minsup, res);
+        if (!done) {
+            if (wantEclat && o.algo == "eclat") log_warn("falling back to FP-Growth");
+            InitialTree tree = build_tree(ranked);
+            res = mine_patterns(tree, minsup);
+        }
+    }
+    write_patterns(o, res, rankToItem);
     log_info("wrote %zu patterns to %s; total %.2f ms", res.item.size(), o.output.c_str(), total.elapsed_ms());
     return res.item.size();
 }

@@ -36,6 +36,9 @@ int main(int argc, char** argv) {
         ->check(CLI::IsMember({"gpu", "cpu", "cpu1"}))
         ->capture_default_str();
     app.add_option("-t,--threads", threads, "CPU threads for --mode cpu (0 = all cores)");
+    app.add_option("-a,--algo", opt.algo, "Algorithm: auto (pick by density), fpgrowth or eclat (bitset)")
+        ->check(CLI::IsMember({"auto", "fpgrowth", "eclat"}))
+        ->capture_default_str();
     app.add_flag("-v,--verbose", opt.verbose, "Verbose (debug) logging");
     CLI11_PARSE(app, argc, argv);
 

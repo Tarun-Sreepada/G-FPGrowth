@@ -20,4 +20,9 @@ struct MiningResult {
 // (sized for the initial tree) always fits any tree that is ever built.
 MiningResult mine_patterns(InitialTree& tree, int minsup);
 
+// Dense-data alternative: vertical bitsets + AND/popcount (Eclat). Same chunked-memory
+// scheme: every class (set of item bitsets) is no larger than the root class.
+// Returns false (and leaves `out` untouched) if too few chunks fit in GPU memory.
+bool mine_eclat(RankedDB& db, int minsup, MiningResult& out);
+
 }  // namespace gfp

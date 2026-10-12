@@ -27,7 +27,8 @@ add_executable(g-fpgrowth
   src/gfpgrowth.cu
   src/parser.cu
   src/fp_tree.cu
-  src/miner.cu)
+  src/miner.cu
+  src/eclat_gpu.cu)
 target_include_directories(g-fpgrowth PRIVATE include)
 set_source_files_properties(src/cpu_fpgrowth.cpp PROPERTIES COMPILE_OPTIONS "-O3;-march=native;-funroll-loops")
 find_package(Threads REQUIRED)
