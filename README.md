@@ -99,6 +99,12 @@ keep many more tasks in flight). Measured mining time, host-driven vs device que
 | connect @0.8 | 23.0 ms | 16.5 ms |
 | chess @0.6 | 13.3 ms | 9.1 ms |
 | retail @0.0005 | 114 ms | 933 ms (not used, too few blocks) |
+| T10I4D100K @0.002 | 40 ms | 137 ms (not used, too few blocks) |
+| BMS2 @0.0008 | 16 ms | 45 ms (not used, too few blocks) |
+
+The last three rows show what would happen without the guard. Testing: all
+scheduler x algorithm combinations match the PAMI reference on the SPMF datasets, and
+repeated device-queue runs on dense inputs produce byte-identical (sorted) output.
 
 ## Benchmark
 
