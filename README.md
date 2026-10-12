@@ -128,6 +128,34 @@ The GPU wins on large sparse data (many transactions, many conditional trees); o
 dense inputs it is bound by fixed costs (CUDA context, transfers, per-batch host round
 trips) or by output formatting, and the multi-threaded CPU wins.
 
+## Sweep: datasets x minimum support x every configuration
+
+`uv run python scripts/sweep.py` runs 10 datasets x 5 minimum supports x 7 configurations
+(GPU FP-Growth with device queue / host batches, GPU Eclat, CPU 12-thread FP-Growth / Eclat,
+CPU 1-thread FP-Growth / Eclat). Every point is a warm-up plus repeated runs until at least
+1 s of wall time accumulated (350 points, 1 s minimum each); the plotted value is the mean
+in-process total (parse, rank, tree or bitmaps, mining, writing the output). All
+configurations must agree on the pattern count at every point. Raw numbers:
+[`docs/sweep.csv`](docs/sweep.csv).
+
+![time vs minimum support](docs/sweep.png)
+
+Reading the plot (RTX 3070 vs Ryzen 5 5500GT; the x axis goes from easy to hard minsup and
+is annotated with the number of patterns found; hollow blue markers are points where the
+device queue declined to run and used host batches):
+
+* **GPU wins** on the large sparse datasets: retail @0.0005 149 ms vs 771 ms (CPU 12T) and
+  2116 ms (CPU 1T); T10I4D100K @0.001 33 ms (GPU Eclat) vs 57 ms (CPU Eclat) and 353 ms
+  (CPU FP-Growth); BMS2 @0.0008 34 ms vs 45 ms.
+* **The 12-thread CPU wins** on the dense and small datasets (chess, mushrooms, connect,
+  pumsb, foodmart, BMS1) and ties on accidents; there the GPU is dominated by fixed costs
+  (context, transfers, record decoding and output formatting).
+* **Eclat vs FP-Growth is dataset dependent**: bitset Eclat is much better on T10I4D100K and
+  accidents, much worse on retail, BMS2, connect, so `-a auto` stays conservative.
+* **The device queue only runs on dense, small-tree inputs** (filled blue markers); it is not
+  uniformly faster than host batches (pumsb @0.65: 2101 ms vs 946 ms), which is why it is
+  worth more tuning before making it the default for large trees.
+
 ### Ideas not done yet
 * smaller chunks for deep recursion levels so the device queue can use more blocks on large trees
 * device-side task queue for the bitset (Eclat) miner
