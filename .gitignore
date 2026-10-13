@@ -3,6 +3,7 @@ build/
 __pycache__/
 *.pyc
 out/
+out.txt
 # datasets are downloaded with scripts/get_datasets.sh
 datasets/*.txt
 !datasets/README.md
